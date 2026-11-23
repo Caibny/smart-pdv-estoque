@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacheco Distribuidora e Espeteria | Gestão</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        input[type="file"]::file-selector-button { background-color: #f1f5f9; border: 1px solid #cbd5e1; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; color: #475569; }
+        .tab-ativa { border-bottom: 3px solid #ef4444; color: white !important; font-weight: bold; }
+        .secao { display: none; height: 100%; }
+        .secao.ativa { display: flex; flex-direction: column; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        /* ESTILO DO CUPOM TÉRMICO */
+        .cupom-papel {
+            font-family: 'Courier New', Courier, monospace;
+            background: #fffdf7;
+            color: #000;
+            padding: 14px 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            line-height: 1.25;
+            font-size: 12px;
+        }
+        .cupom-linha { border-top: 1px dashed #000; margin: 6px 0; }
+
+        /* REGRAS EXCLUSIVAS PARA IMPRESSÃO TÉRMICA */
+        @media print {
+            @page { margin: 0; }
+            body * { visibility: hidden; }
+            body { background: #fff !important; height: auto !important; overflow: visible !important; }
+            #area-impressao-real, #area-impressao-real * { visibility: visible; }
+            #area-impressao-real {
+                position: absolute;
+                left: 0;
+                top: 0;
+                box-shadow: none !important;
+                background: #fff !important;
+                padding: 4mm 3mm !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased h-screen overflow-hidden flex flex-col">
+
+    <!-- ÁREA OCULTA QUE VAI PARA A IMPRESSORA TÉRMICA -->
+    <div id="area-impressao-real" class="cupom-papel hidden print:block" style="width: 80mm;"></div>
+
+    <nav class="bg-black text-white shadow-lg border-b-4 border-red-800 shrink-0 print:hidden">
+        <div class="max-w-7xl mx-auto px-6 flex justify-between h-24 items-center">
+            <div class="flex items-center h-full py-2">
+                <img src="/static/logo.jpg" alt="Logo Pacheco" class="h-20 w-auto object-contain rounded-md shadow-md" onerror="this.src='https://placehold.co/200x80?text=PACHECO'">
+            </div>
+            <div class="hidden md:flex space-x-6 text-sm tracking-wide text-slate-300 font-bold">
+                <a href="#" id="menu-pdv" class="tab-ativa hover:text-white transition pb-1" onclick="mudarTela('pdv')">CAIXA [F1]</a>
+                <a href="#" id="menu-cadastro" class="hover:text-white transition pb-1" onclick="mudarTela('cadastro')">CADASTRO [F2]</a>
+                <a href="#" id="menu-estoque" class="hover:text-white transition pb-1" onclick="mudarTela('estoque')">ESTOQUE & EDIÇÃO [F3]</a>
+                <a href="#" id="menu-dashboard" class="hover:text-white transition pb-1" onclick="mudarTela('dashboard')">DASHBOARD [F4]</a>
+                <a href="#" id="menu-comanda" class="hover:text-white transition pb-1" onclick="mudarTela('comanda')"><i class="fa-solid fa-print mr-1 text-red-400"></i> COMANDA [F5]</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto px-4 py-3 flex-1 w-full overflow-hidden print:hidden">
+
+        <!-- 1. CAIXA (PDV) -->
+        <div id="tela-pdv" class="secao ativa">
+            <div class="flex justify-between items-center mb-3 px-2 shrink-0">
+                <h2 class="text-lg font-bold text-slate-700"><i class="fa-solid fa-cash-register mr-2"></i> Operação de Caixa</h2>
+                <div class="bg-green-100 border border-green-300 text-green-800 px-4 py-1.5 rounded-lg font-bold shadow-sm">
+                    Faturamento Hoje: <span id="faturamento-caixa" class="text-lg">R$ 0,00</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0">
+                <div class="lg:col-span-2 flex flex-col min-h-0 space-y-3">
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200 shrink-0">
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-3 text-slate-400"></i>
+                            <input type="text" id="input-bip-pdv" placeholder="Pesquisar ou Bipar Código [F9]..." oninput="filtrarGradePDV()" class="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-base focus:ring-2 focus:ring-red-500 font-semibold outline-none">
+                        </div>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex-1 overflow-y-auto">
+                        <div id="grid-produtos-pdv" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3"></div>
+                    </div>
+                </div>
+
+                <!-- CARRINHO E DADOS DA COMANDA -->
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col h-full">
+                    <h3 class="font-bold text-slate-700 border-b pb-2 mb-2 text-xs uppercase flex justify-between shrink-0">
+                        <span><i class="fa-solid fa-receipt mr-1"></i> Comanda / Carrinho</span>
+                        <button onclick="limparCarrinho()" class="text-red-500 hover:underline">Limpar [Esc]</button>
+                    </h3>
+
+                    <!-- Dados Rápidos da Comanda (Mesa, Cliente, Tipo) -->
+                    <div class="grid grid-cols-2 gap-1.5 mb-2 shrink-0 bg-slate-50 p-2 rounded border border-slate-200">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase">Mesa / Local</label>
+                            <input type="text" id="cmd-mesa" value="BALCÃO" class="w-full text-xs font-bold border rounded px-2 py-1 uppercase outline-none focus:border-red-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase">Cliente</label>
+                            <input type="text" id="cmd-cliente" placeholder="Ex: Mesa 3 / João" class="w-full text-xs border rounded px-2 py-1 outline-none focus:border-red-500">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase">Tipo / Obs. Pedido</label>
+                            <input type="text" id="cmd-obs-geral" value="PAGO | COMER AQUI" class="w-full text-xs font-semibold border rounded px-2 py-1 outline-none focus:border-red-500">
+                        </div>
+                    </div>
+                    
+                    <div id="lista-carrinho" class="flex-1 overflow-y-auto pr-1 space-y-1.5"></div>
+                    
+                    <div class="border-t pt-2 mt-2 space-y-2 shrink-0">
+                        <div class="flex justify-between items-center text-xs font-bold text-slate-500">
+                            <span>Subtotal:</span><span id="carrinho-subtotal">R$ 0,00</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs font-bold text-red-500">
+                            <span>Desconto (R$):</span>
+                            <input type="number" id="input-desconto" value="0" min="0" step="0.01" oninput="atualizarCarrinho()" class="w-20 text-right border rounded px-2 py-0.5 outline-none focus:border-red-500">
+                        </div>
+                        <div class="flex justify-between items-center font-extrabold text-slate-800 bg-slate-100 px-2.5 py-1.5 rounded">
+                            <span class="text-sm">Total:</span><span id="carrinho-total" class="text-green-700 text-xl">R$ 0,00</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="forma-pagamento" onchange="verificarTroco()" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-bold outline-none text-slate-700">
+                                <option value="Dinheiro">Dinheiro</option>
+                                <option value="PIX">PIX</option>
+                                <option value="Cartão Crédito">Cartão Crédito</option>
+                                <option value="Cartão Débito">Cartão Débito</option>
+                            </select>
+                            <button onclick="imprimirPreviaCarrinho()" title="Imprimir comanda sem fechar venda" class="bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-2 rounded-lg text-xs flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-print"></i> Só Imprimir
+                            </button>
+                        </div>
+                        
+                        <div id="area-troco" class="bg-orange-50 border border-orange-200 px-2.5 py-1.5 rounded-lg flex justify-between items-center text-xs hidden">
+                            <div class="flex items-center gap-1 font-bold text-slate-700">
+                                <span>Recebido:</span>
+                                <input type="number" id="valor-recebido" placeholder="0,00" step="0.01" oninput="calcularTroco()" class="w-16 text-right border rounded px-1 py-0.5 outline-none">
+                            </div>
+                            <div class="font-bold text-red-600">
+                                Troco: <span id="valor-troco">R$ 0,00</span>
+                            </div>
+                        </div>
+
+                        <button onclick="finalizarVenda()" class="w-full bg-red-700 hover:bg-red-800 text-white font-bold py-3 rounded-lg shadow-md transition text-base flex justify-center items-center gap-2">
+                            <i class="fa-solid fa-check"></i> FINALIZAR & IMPRIMIR [Enter]
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. CADASTRO -->
+        <div id="tela-cadastro" class="secao overflow-y-auto pb-10">
+            <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+                <div class="bg-slate-100 border-b px-6 py-4"><h2 class="font-bold text-slate-700"><i class="fa-solid fa-plus mr-2"></i> Cadastro de Produto</h2></div>
+                <div class="p-6 md:flex gap-8">
+                    <div class="md:w-1/4 flex flex-col items-center mb-6 md:mb-0">
+                        <div class="w-48 h-48 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 overflow-hidden relative mb-3">
+                            <img id="img-preview" src="" class="hidden object-cover w-full h-full absolute inset-0 z-10">
+                            <div class="text-center text-slate-400"><i class="fa-solid fa-camera text-2xl mb-1"></i><span class="text-xs">Foto</span></div>
+                        </div>
+                        <input type="file" id="foto" accept="image/*" class="text-xs text-slate-500 w-full">
+                    </div>
+                    <form id="form-produto" class="md:w-3/4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <input type="hidden" id="edit_id" value="">
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1">Cód. Barras</label><input type="text" id="cod_barras" class="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-sm" placeholder="Opcional"></div>
+                        <div class="md:col-span-2"><label class="block text-xs font-bold text-slate-500 mb-1">Nome do Produto</label><input type="text" id="nome" required class="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-sm uppercase"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1">Custo (R$)</label><input type="text" id="custo" required class="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-sm" placeholder="0,00"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1">Venda (R$)</label><input type="text" id="venda" required class="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-sm" placeholder="0,00"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 mb-1">Estoque</label><input type="number" id="estoque" required min="0" class="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-sm"></div>
+                        <div class="md:col-span-3 flex justify-end mt-4">
+                            <button type="button" onclick="cancelarEdicao()" id="btn-cancelar-edicao" class="hidden mr-3 bg-slate-500 text-white py-2 px-6 rounded-md text-sm font-bold">Cancelar</button>
+                            <button type="submit" id="btn-salvar-produto" class="bg-red-800 text-white font-bold py-2 px-8 rounded-md text-sm">SALVAR</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. ESTOQUE -->
+        <div id="tela-estoque" class="secao overflow-y-auto pb-10">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+                <div class="bg-slate-100 border-b px-6 py-4 flex justify-between items-center sticky top-0 z-20">
+                    <h2 class="font-bold text-slate-700"><i class="fa-solid fa-boxes-stacked mr-2"></i> Gestão de Inventário</h2>
+                    <input type="text" id="pesquisa-estoque" placeholder="Buscar..." oninput="filtrarTabelaEstoque()" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm outline-none w-64 focus:border-red-500">
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left text-slate-600">
+                        <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b">
+                            <tr><th class="px-6 py-3">Produto</th><th class="px-6 py-3">Código</th><th class="px-6 py-3 text-center">Estoque</th><th class="px-6 py-3">Custo</th><th class="px-6 py-3">Venda</th><th class="px-6 py-3 text-center">Ações</th></tr>
+                        </thead>
+                        <tbody id="tabela-estoque-corpo" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. DASHBOARD -->
+        <div id="tela-dashboard" class="secao overflow-y-auto pb-10">
+            <div class="space-y-6 mt-2">
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-end justify-between">
+                    <div class="flex flex-wrap gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Data Inicial</label><input type="date" id="filtro-inicio" class="border border-slate-300 rounded-lg p-2 text-sm outline-none"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Data Final</label><input type="date" id="filtro-fim" class="border border-slate-300 rounded-lg p-2 text-sm outline-none"></div>
+                        <div class="flex gap-2 items-end">
+                            <button onclick="aplicarFiltroData()" class="bg-red-800 text-white font-bold py-2 px-6 rounded-lg shadow-md">Filtrar</button>
+                            <button onclick="limparFiltroData()" class="bg-slate-200 text-slate-700 font-bold py-2 px-6 rounded-lg">Mês Atual</button>
+                        </div>
+                    </div>
+                    <div class="mt-4 md:mt-0">
+                        <button onclick="zerarSistema()" class="bg-black hover:bg-slate-800 text-white font-bold py-2 px-6 rounded-lg shadow-md border border-red-900 transition">
+                            <i class="fa-solid fa-skull text-red-500 mr-2"></i> Zerar Histórico
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-gradient-to-r from-red-700 to-red-900 text-white p-5 rounded-xl shadow-md">
+                        <p class="text-xs font-bold uppercase opacity-90">Faturamento Hoje</p>
+                        <h3 id="kpi-hoje" class="text-2xl font-extrabold mt-1">R$ 0,00</h3>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-blue-500">
+                        <p id="lbl-fat" class="text-xs font-bold text-slate-400 uppercase">Faturamento (Bruto)</p>
+                        <h3 id="kpi-mes" class="text-2xl font-bold text-slate-800 mt-1">R$ 0,00</h3>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-green-500">
+                        <p id="lbl-lucro" class="text-xs font-bold text-slate-400 uppercase">Lucro Líquido (Real)</p>
+                        <h3 id="kpi-lucro" class="text-2xl font-bold text-green-700 mt-1">R$ 0,00</h3>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-teal-500">
+                        <p class="text-xs font-bold text-slate-400 uppercase">Vendas PIX</p>
+                        <h3 id="kpi-pix" class="text-2xl font-bold text-slate-800 mt-1">R$ 0,00</h3>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col">
+                        <h3 class="font-bold text-slate-700 border-b pb-3 mb-4 text-sm uppercase">Movimento por Hora</h3>
+                        <div class="relative flex-1 min-h-[250px] flex justify-center items-center">
+                            <span id="msg-hora" class="text-slate-400 text-sm hidden">Sem dados no período.</span>
+                            <canvas id="chartHora"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 lg:col-span-1 flex flex-col">
+                        <h3 class="font-bold text-slate-700 border-b pb-3 mb-4 text-sm uppercase">Top 5 Produtos</h3>
+                        <div class="relative flex-1 min-h-[250px] flex justify-center items-center">
+                            <span id="msg-top" class="text-slate-400 text-sm hidden">Sem dados.</span>
+                            <canvas id="chartTopProdutos"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 lg:col-span-1 flex flex-col">
+                        <h3 class="font-bold text-slate-700 border-b pb-3 mb-4 text-sm uppercase">Receitas por Tipo</h3>
+                        <div class="relative flex-1 min-h-[250px] flex justify-center pb-2 items-center">
+                            <span id="msg-pgto" class="text-slate-400 text-sm hidden">Sem dados.</span>
+                            <canvas id="chartPagamentos"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col h-[350px]">
+                        <div class="bg-slate-50 px-5 py-4 border-b border-slate-200 flex justify-between items-center shrink-0">
+                            <h3 class="font-bold text-slate-700 text-sm uppercase">Histórico de Vendas</h3>
+                            <input type="text" id="filtro-historico" oninput="filtrarHistorico()" placeholder="Buscar item..." class="px-3 py-1.5 text-xs border rounded w-48">
+                        </div>
+                        <div class="overflow-y-auto flex-1">
+                            <table class="w-full text-xs text-left text-slate-600">
+                                <thead class="text-[10px] text-slate-500 uppercase bg-slate-100 sticky top-0 shadow-sm">
+                                    <tr><th class="px-4 py-3 font-bold">Data/Hora</th><th class="px-4 py-3 font-bold">Produto</th><th class="px-4 py-3 font-bold text-center">Qtd</th><th class="px-4 py-3 font-bold text-right">Total</th><th class="px-4 py-3 font-bold text-center">Comanda</th></tr>
+                                </thead>
+                                <tbody id="tabela-historico" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. PERSONALIZAR COMANDA TÉRMICA [F5] -->
+        <div id="tela-comanda" class="secao overflow-y-auto pb-10">
+            <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
+                
+                <!-- Painel de Configuração -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+                    <h2 class="font-bold text-slate-800 border-b pb-3 text-base">
+                        <i class="fa-solid fa-sliders text-red-700 mr-2"></i> Personalizar Impressão Térmica
+                    </h2>
+                    
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nome Principal (Cabeçalho)</label>
+                        <input type="text" id="cfg-titulo" oninput="atualizarPreviewComanda()" class="w-full border rounded-lg p-2.5 text-sm font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Subtítulo</label>
+                        <input type="text" id="cfg-subtitulo" oninput="atualizarPreviewComanda()" class="w-full border rounded-lg p-2.5 text-sm">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Atendente Padrão</label>
+                            <input type="text" id="cfg-atendente" oninput="atualizarPreviewComanda()" class="w-full border rounded-lg p-2.5 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Largura da Bobina</label>
+                            <select id="cfg-largura" onchange="atualizarPreviewComanda()" class="w-full border rounded-lg p-2.5 text-sm font-bold">
+                                <option value="80mm">80mm (Padrão Grande)</option>
+                                <option value="58mm">58mm (Mini Impressora)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Mensagem de Rodapé</label>
+                        <textarea id="cfg-rodape" rows="2" oninput="atualizarPreviewComanda()" class="w-full border rounded-lg p-2.5 text-sm"></textarea>
+                    </div>
+                    <div class="flex items-center gap-2 bg-slate-50 p-3 rounded-lg border">
+                        <input type="checkbox" id="cfg-auto" class="w-4 h-4 accent-red-700">
+                        <label for="cfg-auto" class="text-xs font-bold text-slate-700 cursor-pointer">
+                            Abrir tela de impressão automaticamente ao finalizar venda no Caixa
+                        </label>
+                    </div>
+
+                    <div class="flex gap-3 pt-2">
+                        <button onclick="salvarConfigComanda()" class="flex-1 bg-red-800 hover:bg-red-900 text-white font-bold py-3 rounded-lg shadow transition text-sm">
+                            <i class="fa-solid fa-floppy-disk mr-1"></i> SALVAR MODELO
+                        </button>
+                        <button onclick="testarImpressaoComanda()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 px-5 rounded-lg shadow transition text-sm">
+                            <i class="fa-solid fa-print mr-1"></i> Testar Impressora
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Preview ao Vivo da Comanda -->
+                <div class="flex flex-col items-center justify-center bg-slate-200 rounded-xl p-6 border border-slate-300">
+                    <span class="text-xs font-bold text-slate-500 uppercase mb-3"><i class="fa-regular fa-eye mr-1"></i> Pré-visualização do Papel Térmico</span>
+                    <div id="preview-comanda-box" class="cupom-papel" style="width: 80mm;"></div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- SCRIPTS CORE -->
+    <script>
+        let produtos = [];
+        let carrinho = [];
+        let dashCache = null;
+        let configComanda = {
+            titulo: "Pacheco",
+            subtitulo: "Distribuidora e Espeteria",
+            atendente_padrao: "Atendente 01",
+            rodape: "Obrigado pela preferência!\nVolte sempre! :)",
+            largura_mm: "80mm",
+            imprimir_auto: 1
+        };
+
+        let chartTopInstance = null; let chartPagamentoInstance = null; let chartHoraInstance = null;
+
+        async function carregarDados() {
+            try {
+                const [resProd, resCfg] = await Promise.all([
+                    fetch('/api/produtos'),
+                    fetch('/api/comanda/config')
+                ]);
+                produtos = await resProd.json();
+                configComanda = await resCfg.json();
+                
+                preencherFormularioConfig();
+                renderizarGradePDV(produtos);
+                renderizarTabelaEstoque(produtos);
+                await carregarDashboardDados();
+                verificarTroco();
+            } catch(e) { console.error(e); }
+        }
+        window.onload = carregarDados;
+
+        function mudarTela(id) {
+            document.querySelectorAll('.secao').forEach(s => s.classList.remove('ativa'));
+            document.querySelectorAll('nav a').forEach(a => a.classList.remove('tab-ativa'));
+            document.getElementById(`tela-${id}`).classList.add('ativa');
+            document.getElementById(`menu-${id}`).classList.add('tab-ativa');
+            if (id === 'pdv') document.getElementById('input-bip-pdv').focus();
+            if (id === 'dashboard') carregarDashboardDados();
+            if (id === 'comanda') atualizarPreviewComanda();
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if(e.key === 'F1') { e.preventDefault(); mudarTela('pdv'); }
+            if(e.key === 'F2') { e.preventDefault(); mudarTela('cadastro'); }
+            if(e.key === 'F3') { e.preventDefault(); mudarTela('estoque'); }
+            if(e.key === 'F4') { e.preventDefault(); mudarTela('dashboard'); }
+            if(e.key === 'F5') { e.preventDefault(); mudarTela('comanda'); }
+            if(e.key === 'F9') { e.preventDefault(); document.getElementById('input-bip-pdv').focus(); }
+            
+            const telaPDV = document.getElementById('tela-pdv').classList.contains('ativa');
+            if(telaPDV) {
+                if(e.key === 'Escape') { e.preventDefault(); limparCarrinho(); }
+                if(e.key === 'Enter' && carrinho.length > 0 && document.activeElement.tagName !== 'INPUT') { 
+                    e.preventDefault(); finalizarVenda(); 
+                }
+            }
+        });
+
+        // --- GERADOR DE HTML DO CUPOM TÉRMICO ---
+        function gerarHTMLCupom(dadosPedido, cfg) {
+            const itensHTML = dadosPedido.itens.map(item => `
+                <div style="display:flex; justify-content:space-between; margin-top:3px;">
+                    <span>${item.qtd}x ${item.nome}</span>
+                    <span style="font-weight:bold;">R$${item.sub.toFixed(2).replace('.',',')}</span>
+                </div>
+                ${item.obs ? `<div style="padding-left:10px; font-size:11px;">Obs: ${item.obs}</div>` : ''}
+            `).join('');
+
+            const rodapeHTML = cfg.rodape.replace(/\n/g, '<br>');
+
+            return `
+                <div style="text-align:center; margin-bottom:8px;">
+                    <div style="font-size:18px; font-weight:bold; letter-spacing:0.5px;">${cfg.titulo}</div>
+                    <div style="font-size:11px;">${cfg.subtitulo}</div>
+                </div>
+                <div style="font-size:11px;">
+                    <div>PEDIDO: #${dadosPedido.pedido_id}</div>
+                    <div>MESA: ${dadosPedido.mesa}</div>
+                    <div>DATA: ${dadosPedido.data_hora_br}</div>
+                    <div>ATENDENTE: ${dadosPedido.atendente}</div>
+                    ${dadosPedido.cliente ? `<div style="margin-top:4px; font-weight:bold;">** CLIENTE: ${dadosPedido.cliente} **</div>` : ''}
+                </div>
+                <div class="cupom-linha"></div>
+                <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:11px;">
+                    <span>ITEM</span>
+                    <span>TOTAL</span>
+                </div>
+                <div class="cupom-linha"></div>
+                <div>${itensHTML}</div>
+                <div class="cupom-linha"></div>
+                ${dadosPedido.obs_geral ? `<div style="font-size:11px; font-weight:bold;">Obs: *** ${dadosPedido.obs_geral} ***</div><div class="cupom-linha"></div>` : ''}
+                ${dadosPedido.desconto > 0 ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>DESCONTO:</span><span>- R$${dadosPedido.desconto.toFixed(2).replace('.',',')}</span></div>` : ''}
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:16px; font-weight:bold; margin:4px 0;">
+                    <span>TOTAL:</span>
+                    <span>R$${dadosPedido.total.toFixed(2).replace('.',',')}</span>
+                </div>
+                <div style="font-size:10px; text-align:right;">Pgto: ${dadosPedido.forma_pagamento}</div>
+                <div class="cupom-linha"></div>
+                <div style="text-align:center; font-size:11px; margin-top:6px;">
+                    ${rodapeHTML}
+                </div>
+            `;
+        }
+
+        function dispararImpressaoTermica(dadosPedido) {
+            const area = document.getElementById('area-impressao-real');
+            area.style.width = configComanda.largura_mm;
+            area.innerHTML = gerarHTMLCupom(dadosPedido, configComanda);
+            window.print();
+        }
+
+        // --- CONFIGURAÇÃO E PREVIEW DA COMANDA ---
+        function preencherFormularioConfig() {
+            document.getElementById('cfg-titulo').value = configComanda.titulo;
+            document.getElementById('cfg-subtitulo').value = configComanda.subtitulo;
+            document.getElementById('cfg-atendente').value = configComanda.atendente_padrao;
+            document.getElementById('cfg-largura').value = configComanda.largura_mm;
+            document.getElementById('cfg-rodape').value = configComanda.rodape;
+            document.getElementById('cfg-auto').checked = configComanda.imprimir_auto === 1;
+            atualizarPreviewComanda();
+        }
+
+        function obterConfigDoFormulario() {
+            return {
+                titulo: document.getElementById('cfg-titulo').value || "Pacheco",
+                subtitulo: document.getElementById('cfg-subtitulo').value || "",
+                atendente_padrao: document.getElementById('cfg-atendente').value || "Caixa",
+                largura_mm: document.getElementById('cfg-largura').value,
+                rodape: document.getElementById('cfg-rodape').value || "",
+                imprimir_auto: document.getElementById('cfg-auto').checked ? 1 : 0
+            };
+        }
+
+        function atualizarPreviewComanda() {
+            const cfgTemp = obterConfigDoFormulario();
+            const box = document.getElementById('preview-comanda-box');
+            box.style.width = cfgTemp.largura_mm;
+            
+            const exemploPedido = {
+                pedido_id: "9055",
+                mesa: "BALCÃO",
+                data_hora_br: "19/11/2026 19:52",
+                atendente: cfgTemp.atendente_padrao,
+                cliente: "Mesa 3",
+                obs_geral: "TIPO: PENDENTE PG | FORMA: COMER AQUI",
+                forma_pagamento: "PIX",
+                desconto: 0,
+                total: 72.95,
+                itens: [
+                    { qtd: 1, nome: "Suco Prats 300", sub: 8.00, obs: "Laranja" },
+                    { qtd: 1, nome: "Latão Original", sub: 8.99, obs: "" },
+                    { qtd: 1, nome: "Espeto Boi", sub: 8.00, obs: "Porção" },
+                    { qtd: 1, nome: "Jantinha Especial", sub: 24.99, obs: "-> Espeto Boi" }
+                ]
+            };
+            box.innerHTML = gerarHTMLCupom(exemploPedido, cfgTemp);
+        }
+
+        async function salvarConfigComanda() {
+            const payload = obterConfigDoFormulario();
+            try {
+                const res = await fetch('/api/comanda/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if(res.ok) {
+                    configComanda = payload;
+                    alert("Modelo da comanda salvo com sucesso!");
+                }
+            } catch(e) { alert("Erro ao salvar configuração."); }
+        }
+
+        function testarImpressaoComanda() {
+            const cfgTemp = obterConfigDoFormulario();
+            const exemploPedido = {
+                pedido_id: "TESTE",
+                mesa: "BALCÃO",
+                data_hora_br: new Date().toLocaleString('pt-BR').slice(0, 16),
+                atendente: cfgTemp.atendente_padrao,
+                cliente: "Teste Impressora",
+                obs_geral: "TESTE DE IMPRESSÃO TÉRMICA",
+                forma_pagamento: "Dinheiro",
+                desconto: 0,
+                total: 22.00,
+                itens: [
+                    { qtd: 1, nome: "COPÃO", sub: 14.00, obs: "Gelo de coco" },
+                    { qtd: 1, nome: "COCA LATA", sub: 8.00, obs: "" }
+                ]
+            };
+            const area = document.getElementById('area-impressao-real');
+            area.style.width = cfgTemp.largura_mm;
+            area.innerHTML = gerarHTMLCupom(exemploPedido, cfgTemp);
+            window.print();
+        }
+
+        // --- PDV LÓGICA ---
+        function renderizarGradePDV(lista) {
+            const grid = document.getElementById('grid-produtos-pdv'); grid.innerHTML = '';
+            lista.forEach(p => {
+                const img = p.foto_url || 'https://placehold.co/150?text=Sem+Foto';
+                const card = document.createElement('div');
+                card.className = `bg-white border ${p.estoque <= 5 ? 'border-red-400' : 'border-slate-200'} rounded-xl p-2.5 cursor-pointer hover:shadow-md flex flex-col h-[165px]`;
+                card.onclick = () => adicionarAoCarrinho(p.id);
+                card.innerHTML = `
+                    <img src="${img}" class="h-20 w-full object-contain mb-1.5 bg-slate-50 flex-1 rounded">
+                    <h4 class="font-bold text-[11px] text-slate-700 truncate mb-1">${p.nome}</h4>
+                    <div class="flex justify-between items-center">
+                        <span class="text-green-700 font-extrabold text-sm">R$ ${p.venda.toFixed(2).replace('.',',')}</span>
+                        <span class="text-[10px] ${p.estoque <= 5 ? 'bg-red-100 text-red-700' : 'bg-slate-200'} px-1.5 py-0.5 rounded font-bold">${p.estoque} un</span>
+                    </div>`;
+                grid.appendChild(card);
+            });
+        }
+
+        function filtrarGradePDV() {
+            const t = document.getElementById('input-bip-pdv').value.toUpperCase();
+            const exato = produtos.find(p => p.cod_barras === t);
+            if (exato) { adicionarAoCarrinho(exato.id); document.getElementById('input-bip-pdv').value = ''; filtrarGradePDV(); return; }
+            renderizarGradePDV(produtos.filter(p => p.nome.includes(t) || p.cod_barras.includes(t)));
+        }
+
+        function adicionarAoCarrinho(id) {
+            const p = produtos.find(x => x.id === id);
+            if(!p || p.estoque <= 0) return alert("Sem estoque.");
+            const item = carrinho.find(x => x.id === id);
+            if(item) { if(item.quantidade >= p.estoque) return alert("Estoque limite."); item.quantidade++; } 
+            else { carrinho.push({ id: p.id, nome: p.nome, preco: p.venda, quantidade: 1, obs: "" }); }
+            atualizarCarrinho();
+        }
+
+        function atualizarObsItem(idx, valor) {
+            carrinho[idx].obs = valor;
+        }
+
+        function removerDoCarrinho(idx) { carrinho.splice(idx, 1); atualizarCarrinho(); }
+        function limparCarrinho() { 
+            carrinho = []; 
+            document.getElementById('input-desconto').value = 0; 
+            document.getElementById('cmd-cliente').value = '';
+            atualizarCarrinho(); 
+            document.getElementById('input-bip-pdv').focus(); 
+        }
+
+        function verificarTroco() {
+            const fp = document.getElementById('forma-pagamento').value;
+            const area = document.getElementById('area-troco');
+            if(fp === 'Dinheiro') { area.classList.remove('hidden'); calcularTroco(); } 
+            else { area.classList.add('hidden'); }
+        }
+
+        function calcularTroco() {
+            const total = parseFloat(document.getElementById('carrinho-total').dataset.val || 0);
+            const recStr = document.getElementById('valor-recebido').value.replace(',', '.');
+            const rec = parseFloat(recStr) || 0;
+            const troco = Math.max(0, rec - total);
+            document.getElementById('valor-troco').innerText = `R$ ${troco.toFixed(2).replace('.',',')}`;
+        }
+
+        function atualizarCarrinho() {
+            const lista = document.getElementById('lista-carrinho');
+            let sub = 0;
+            if(carrinho.length === 0) {
+                lista.innerHTML = '<p class="text-center text-slate-400 py-8 text-xs">Carrinho vazio.</p>';
+            } else {
+                lista.innerHTML = '';
+                carrinho.forEach((item, idx) => {
+                    const s = item.preco * item.quantidade; sub += s;
+                    lista.innerHTML += `
+                        <div class="bg-slate-50 p-2 border rounded space-y-1">
+                            <div class="flex justify-between items-center">
+                                <div class="flex-1 overflow-hidden pr-2">
+                                    <p class="font-bold text-slate-700 text-[11px] truncate">${item.quantidade}x ${item.nome}</p>
+                                </div>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <span class="font-bold text-slate-700 text-xs">R$ ${s.toFixed(2).replace('.',',')}</span>
+                                    <button onclick="removerDoCarrinho(${idx})" class="text-red-500 px-1"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                                </div>
+                            </div>
+                            <input type="text" value="${item.obs}" oninput="atualizarObsItem(${idx}, this.value)" placeholder="Obs: ex. Porção, Sem gelo..." class="w-full text-[11px] bg-white border border-slate-200 rounded px-2 py-0.5 outline-none focus:border-red-400">
+                        </div>`;
+                });
+            }
+            
+            const desc = parseFloat(document.getElementById('input-desconto').value) || 0;
+            const total = Math.max(0, sub - desc);
+            
+            document.getElementById('carrinho-subtotal').innerText = `R$ ${sub.toFixed(2).replace('.',',')}`;
+            const tEl = document.getElementById('carrinho-total');
+            tEl.innerText = `R$ ${total.toFixed(2).replace('.',',')}`;
+            tEl.dataset.val = total;
+            calcularTroco();
+        }
+
+        function imprimirPreviaCarrinho() {
+            if(carrinho.length === 0) return alert("Carrinho vazio.");
+            const desc = parseFloat(document.getElementById('input-desconto').value) || 0;
+            let sub = 0;
+            const itensFmt = carrinho.map(i => {
+                const s = i.preco * i.quantidade;
+                sub += s;
+                return { nome: i.nome, qtd: i.quantidade, sub: s, obs: i.obs };
+            });
+            dispararImpressaoTermica({
+                pedido_id: "PRÉVIA",
+                data_hora_br: new Date().toLocaleString('pt-BR').slice(0, 16),
+                mesa: document.getElementById('cmd-mesa').value || "BALCÃO",
+                cliente: document.getElementById('cmd-cliente').value,
+                atendente: configComanda.atendente_padrao,
+                obs_geral: document.getElementById('cmd-obs-geral').value,
+                forma_pagamento: document.getElementById('forma-pagamento').value,
+                desconto: desc,
+                total: Math.max(0, sub - desc),
+                itens: itensFmt
+            });
+        }
+
+        async function finalizarVenda() {
+            if(carrinho.length === 0) return;
+            const desc = parseFloat(document.getElementById('input-desconto').value) || 0;
+            const payload = {
+                itens: carrinho.map(i => ({ id: i.id, quantidade: i.quantidade, obs: i.obs })),
+                forma_pagamento: document.getElementById('forma-pagamento').value,
+                desconto: desc,
+                mesa: document.getElementById('cmd-mesa').value || "BALCÃO",
+                cliente: document.getElementById('cmd-cliente').value,
+                atendente: configComanda.atendente_padrao,
+                obs_geral: document.getElementById('cmd-obs-geral').value
+            };
+
+            try {
+                const res = await fetch('/api/vendas', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if(res.ok) {
+                    const dadosPedido = await res.json();
+                    limparCarrinho();
+                    document.getElementById('valor-recebido').value = '';
+                    await carregarDados();
+                    
+                    if(configComanda.imprimir_auto === 1) {
+                        dispararImpressaoTermica(dadosPedido);
+                    }
+                } else {
+                    const err = await res.json();
+                    alert(err.detail);
+                }
+            } catch(e) { alert("Erro de conexão."); }
+        }
+
+        async function reimprimirComanda(vendaId) {
+            try {
+                const res = await fetch(`/api/vendas/${vendaId}/comanda`);
+                if(res.ok) {
+                    const dados = await res.json();
+                    dispararImpressaoTermica(dados);
+                }
+            } catch(e) { alert("Erro ao carregar comanda."); }
+        }
+
+        // --- SEGURANÇA: ZERAR SISTEMA ---
+        async function zerarSistema() {
+            const conf1 = confirm("ATENÇÃO: Você está prestes a apagar permanentemente todas as vendas e faturamento.\n\nDeseja continuar?");
+            if(!conf1) return;
+            const senha = prompt("Digite a senha de administrador (PACHECO2026):");
+            if(!senha) return;
+
+            try {
+                const res = await fetch('/api/vendas/reset', {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({senha: senha})
+                });
+                if(res.ok) {
+                    alert("Histórico zerado com sucesso!");
+                    carregarDashboardDados();
+                } else {
+                    const err = await res.json();
+                    alert("ERRO: " + err.detail);
+                }
+            } catch(e) { alert("Erro ao comunicar com o servidor."); }
+        }
+
+        // --- DASHBOARD ---
+        async function carregarDashboardDados(inicio = '', fim = '') {
+            try {
+                let url = '/api/dashboard';
+                if (inicio && fim) url += `?inicio=${inicio}&fim=${fim}`;
+                const res = await fetch(url);
+                dashCache = await res.json();
+                atualizarVisualDashboard();
+            } catch(e) { console.error(e); }
+        }
+
+        function aplicarFiltroData() {
+            const i = document.getElementById('filtro-inicio').value; const f = document.getElementById('filtro-fim').value;
+            if(!i || !f) return alert("Selecione as datas.");
+            document.getElementById('lbl-fat').innerHTML = '<i class="fa-solid fa-filter text-red-500"></i> Faturamento';
+            document.getElementById('lbl-lucro').innerHTML = '<i class="fa-solid fa-filter text-red-500"></i> Lucro';
+            carregarDashboardDados(i, f);
+        }
+        function limparFiltroData() {
+            document.getElementById('filtro-inicio').value = ''; document.getElementById('filtro-fim').value = '';
+            document.getElementById('lbl-fat').innerText = 'Faturamento (Bruto)'; document.getElementById('lbl-lucro').innerText = 'Lucro Líquido (Real)';
+            carregarDashboardDados();
+        }
+
+        function destruirGraficos() {
+            if(chartTopInstance) chartTopInstance.destroy(); if(chartPagamentoInstance) chartPagamentoInstance.destroy(); if(chartHoraInstance) chartHoraInstance.destroy();
+        }
+
+        function atualizarVisualDashboard() {
+            if(!dashCache) return;
+            document.getElementById('faturamento-caixa').innerText = `R$ ${dashCache.fat_hoje.toFixed(2).replace('.',',')}`;
+            document.getElementById('kpi-hoje').innerText = `R$ ${dashCache.fat_hoje.toFixed(2).replace('.',',')}`;
+            document.getElementById('kpi-mes').innerText = `R$ ${dashCache.fat_periodo.toFixed(2).replace('.',',')}`;
+            document.getElementById('kpi-lucro').innerText = `R$ ${dashCache.lucro_periodo.toFixed(2).replace('.',',')}`;
+            
+            const pix = dashCache.pgto_stats.find(p => p.forma_pagamento === 'PIX');
+            document.getElementById('kpi-pix').innerText = pix ? `R$ ${pix.total.toFixed(2).replace('.',',')}` : 'R$ 0,00';
+
+            renderizarHistorico(dashCache.historico);
+            destruirGraficos();
+
+            const mH = document.getElementById('msg-hora'); const mT = document.getElementById('msg-top'); const mP = document.getElementById('msg-pgto');
+            document.getElementById('chartHora').style.display = dashCache.vendas_hora.length ? 'block' : 'none'; mH.style.display = dashCache.vendas_hora.length ? 'none' : 'block';
+            document.getElementById('chartTopProdutos').style.display = dashCache.top_produtos.length ? 'block' : 'none'; mT.style.display = dashCache.top_produtos.length ? 'none' : 'block';
+            document.getElementById('chartPagamentos').style.display = dashCache.pgto_stats.length ? 'block' : 'none'; mP.style.display = dashCache.pgto_stats.length ? 'none' : 'block';
+
+            if(dashCache.vendas_hora.length) desenharGraficoHora(dashCache.vendas_hora);
+            if(dashCache.top_produtos.length) desenharGraficoProdutos(dashCache.top_produtos);
+            if(dashCache.pgto_stats.length) desenharGraficoPagamentos(dashCache.pgto_stats);
+        }
+
+        function renderizarHistorico(itens) {
+            const tb = document.getElementById('tabela-historico'); tb.innerHTML = '';
+            if(!itens.length) { tb.innerHTML = '<tr><td colspan="5" class="text-center py-4">Vazio.</td></tr>'; return; }
+            itens.forEach(i => {
+                const dia = i.data_hora.split(' ')[0].split('-').reverse().join('/'); const h = i.data_hora.split(' ')[1].substring(0,5);
+                tb.innerHTML += `
+                    <tr class="hover:bg-slate-50">
+                        <td class="px-4 py-2">${dia} ${h}</td>
+                        <td class="px-4 py-2 font-bold">${i.nome_produto}</td>
+                        <td class="px-4 py-2 text-center">${i.quantidade}</td>
+                        <td class="px-4 py-2 text-right text-green-700 font-bold">R$ ${i.subtotal.toFixed(2).replace('.',',')}</td>
+                        <td class="px-4 py-2 text-center">
+                            <button onclick="reimprimirComanda(${i.venda_id})" title="Reimprimir Comanda #${i.venda_id}" class="text-slate-600 hover:text-black p-1">
+                                <i class="fa-solid fa-print"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+            });
+        }
+        function filtrarHistorico() { const t = document.getElementById('filtro-historico').value.toUpperCase(); renderizarHistorico(dashCache.historico.filter(i => i.nome_produto.includes(t))); }
+
+        function desenharGraficoHora(d) {
+            chartHoraInstance = new Chart(document.getElementById('chartHora').getContext('2d'), {
+                type: 'line', data: { labels: d.map(x=>x.hora+'h'), datasets: [{ label: 'R$', data: d.map(x=>x.total), borderColor: '#2563eb', backgroundColor: 'rgba(37, 99, 235, 0.1)', fill: true, tension: 0.4 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+        function desenharGraficoProdutos(d) {
+            chartTopInstance = new Chart(document.getElementById('chartTopProdutos').getContext('2d'), {
+                type: 'bar', data: { labels: d.map(x=>x.nome_produto.substring(0,15)), datasets: [{ data: d.map(x=>x.total_vendido), backgroundColor: '#b91c1c' }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
+            });
+        }
+        function desenharGraficoPagamentos(d) {
+            const cores = {'Dinheiro':'#16a34a', 'PIX':'#0d9488', 'Cartão Crédito':'#2563eb', 'Cartão Débito':'#0284c7'};
+            chartPagamentoInstance = new Chart(document.getElementById('chartPagamentos').getContext('2d'), {
+                type: 'doughnut', data: { labels: d.map(x=>x.forma_pagamento), datasets: [{ data: d.map(x=>x.total), backgroundColor: d.map(x=>cores[x.forma_pagamento]||'#94a3b8') }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // CADASTRO/ESTOQUE DOM
+        const fotoInput = document.getElementById('foto'); const imgPreview = document.getElementById('img-preview');
+        fotoInput.addEventListener('change', e => { if(e.target.files[0]){ const r = new FileReader(); r.onload = ev => { imgPreview.src = ev.target.result; imgPreview.classList.remove('hidden'); }; r.readAsDataURL(e.target.files[0]); } });
+        document.getElementById('form-produto').addEventListener('submit', async (e) => {
+            e.preventDefault(); const fd = new FormData();
+            fd.append('cod_barras', document.getElementById('cod_barras').value); fd.append('nome', document.getElementById('nome').value); fd.append('custo', document.getElementById('custo').value); fd.append('venda', document.getElementById('venda').value); fd.append('estoque', document.getElementById('estoque').value);
+            if(fotoInput.files[0]) fd.append('foto', fotoInput.files[0]);
+            const id = document.getElementById('edit_id').value;
+            try { const res = await fetch(id ? `/api/produtos/${id}` : '/api/produtos', { method: id ? 'PUT' : 'POST', body: fd });
+                if(res.ok){ cancelarEdicao(); carregarDados(); mudarTela('estoque'); } else { const err = await res.json(); alert(err.detail); }
+            } catch(e) { alert("Erro de conexão."); }
+        });
+        function renderizarTabelaEstoque(lista) {
+            const tb = document.getElementById('tabela-estoque-corpo'); tb.innerHTML = '';
+            lista.forEach(p => {
+                tb.innerHTML += `<tr class="hover:bg-slate-50 border-b border-slate-100">
+                    <td class="px-6 py-2 font-bold text-slate-700">${p.nome}</td><td class="px-6 py-2 font-mono text-xs">${p.cod_barras}</td>
+                    <td class="px-6 py-2 text-center"><span class="${p.estoque<=5?'bg-red-100 text-red-700':'bg-slate-200'} px-2 rounded font-bold">${p.estoque}</span></td>
+                    <td class="px-6 py-2 text-slate-500">R$ ${p.custo.toFixed(2).replace('.',',')}</td><td class="px-6 py-2 font-bold text-green-700">R$ ${p.venda.toFixed(2).replace('.',',')}</td>
+                    <td class="px-6 py-2 text-center"><button onclick="carregarParaEdicao(${p.id})" class="text-blue-600 hover:bg-blue-100 p-2 rounded mr-2"><i class="fa-solid fa-pen"></i></button><button onclick="excluirProduto(${p.id})" class="text-red-600 hover:bg-red-100 p-2 rounded"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+            });
+        }
+        function filtrarTabelaEstoque() { const t = document.getElementById('pesquisa-estoque').value.toUpperCase(); renderizarTabelaEstoque(produtos.filter(p => p.nome.includes(t) || p.cod_barras.includes(t))); }
+        function carregarParaEdicao(id) { const p = produtos.find(x=>x.id===id); document.getElementById('edit_id').value = p.id; document.getElementById('cod_barras').value = p.cod_barras; document.getElementById('cod_barras').disabled = true; document.getElementById('nome').value = p.nome; document.getElementById('custo').value = p.custo.toFixed(2).replace('.',','); document.getElementById('venda').value = p.venda.toFixed(2).replace('.',','); document.getElementById('estoque').value = p.estoque; if(p.foto_url){ imgPreview.src = p.foto_url; imgPreview.classList.remove('hidden'); } document.getElementById('btn-cancelar-edicao').classList.remove('hidden'); mudarTela('cadastro'); }
+        function cancelarEdicao() { document.getElementById('form-produto').reset(); document.getElementById('edit_id').value = ''; document.getElementById('cod_barras').disabled = false; imgPreview.src = ''; imgPreview.classList.add('hidden'); document.getElementById('btn-cancelar-edicao').classList.add('hidden'); }
+        async function excluirProduto(id) { if(confirm("Excluir produto?")) { await fetch(`/api/produtos/${id}`, { method: 'DELETE' }); carregarDados(); } }
+    </script>
+</body>
+</html>
